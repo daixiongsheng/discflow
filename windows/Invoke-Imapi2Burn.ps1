@@ -1,4 +1,4 @@
-﻿param(
+param(
     [Parameter(Mandatory = $true)]
     [string]$ManifestPath
 )
@@ -226,7 +226,7 @@ namespace DiscFlow
         foreach ($drivePath in $drivePaths) {
             $normalised = ([string]$drivePath).TrimEnd("\", ":").ToUpperInvariant()
             $availableDrives += $normalised
-            if (-not $selectedRecorder -and ($not $desiredDrive -or $normalised -eq $desiredDrive)) {
+            if (-not $selectedRecorder -and (-not $desiredDrive -or $normalised -eq $desiredDrive)) {
                 $selectedRecorder = $recorder
             }
         }
