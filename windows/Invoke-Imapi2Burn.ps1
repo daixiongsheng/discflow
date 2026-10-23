@@ -36,7 +36,7 @@ function Open-ReadStream {
     param([string]$Path)
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        throw "找不到要刻录的文件：$Path"
+        throw "File to burn not found: $Path"
     }
 
     return [DiscFlow.ManagedIStream]::OpenRead($Path)
@@ -44,13 +44,13 @@ function Open-ReadStream {
 
 try {
     if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
-        throw "找不到刻录任务清单：$ManifestPath"
+        throw "Burn manifest not found: $ManifestPath"
     }
 
     $manifest = Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 |
         ConvertFrom-Json
 
-    Add-Type -TypeDefinition @"
+        Add-Type -TypeDefinition @"
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -66,7 +66,8 @@ namespace DiscFlow
 
         public ManagedIStream(Stream source)
         {
-            stream = source ?? throw new ArgumentNullException("source");
+            if (source == null) throw new ArgumentNullException("source");
+            stream = source;
         }
 
         public static ManagedIStream OpenRead(string path)
@@ -169,9 +170,9 @@ namespace DiscFlow
             throw new NotSupportedException();
         }
 
-        public void Stat(out STATSTG statstg, int flags)
+        public void Stat(out System.Runtime.InteropServices.ComTypes.STATSTG statstg, int flags)
         {
-            statstg = new STATSTG();
+            statstg = new System.Runtime.InteropServices.ComTypes.STATSTG();
             statstg.type = 2;
             statstg.cbSize = stream.Length;
             statstg.grfMode = 0;
@@ -207,11 +208,11 @@ namespace DiscFlow
 }
 "@
 
-    Write-ProgressStatus -Percent 8 -Message "正在检查刻录机"
+    Write-ProgressStatus -Percent 8 -Message "Checking for disc recorders"
 
     $discMaster = New-Object -ComObject "IMAPI2.MsftDiscMaster2"
     if ($discMaster.Count -eq 0) {
-        throw "没有检测到可用的刻录机"
+        throw "No available disc recorder detected"
     }
 
     $selectedRecorder = $null
@@ -237,12 +238,12 @@ namespace DiscFlow
             $availableDrives -join ", "
         }
         else {
-            "无盘符"
+            "No drive letters"
         }
-        throw "找不到刻录机 '$desiredDrive'。当前设备：$driveList"
+        throw "Recorder '$desiredDrive' not found. Available devices: $driveList"
     }
 
-    Write-ProgressStatus -Percent 14 -Message "正在确认空白盘片"
+    Write-ProgressStatus -Percent 14 -Message "Confirming blank media"
 
     $formatData = New-Object -ComObject "IMAPI2.MsftDiscFormat2Data"
     $formatData.Recorder = $selectedRecorder
@@ -250,13 +251,13 @@ namespace DiscFlow
     $formatData.BufferUnderrunFreeDisabled = $false
 
     if (-not $formatData.IsRecorderSupported($selectedRecorder)) {
-        throw "当前刻录机不被 IMAPI2 数据写入接口支持"
+        throw "The current recorder is not supported by the IMAPI2 data writing interface"
     }
     if (-not $formatData.IsCurrentMediaSupported($selectedRecorder)) {
-        throw "当前盘片不被该刻录机支持"
+        throw "The current media is not supported by this recorder"
     }
     if (-not ($formatData.MediaPhysicallyBlank -or $formatData.MediaHeuristicallyBlank)) {
-        throw "请放入空白可写盘片。为避免误擦除，本任务不会自动覆写已有内容。"
+        throw "Please insert a blank writable disc. To avoid accidental erasure, this task will not automatically overwrite existing content."
     }
 
     $dataStream = $null
@@ -265,11 +266,11 @@ namespace DiscFlow
 
     try {
         if ($manifest.mode -eq "iso") {
-            Write-ProgressStatus -Percent 24 -Message "正在打开 ISO 镜像"
+            Write-ProgressStatus -Percent 24 -Message "Opening ISO image"
             $dataStream = Open-ReadStream -Path ([string]$manifest.isoPath)
         }
         elseif ($manifest.mode -eq "files") {
-            Write-ProgressStatus -Percent 22 -Message "正在整理光盘文件系统"
+            Write-ProgressStatus -Percent 22 -Message "Preparing disc file system"
             $fileSystemImage = New-Object -ComObject "IMAPI2FS.MsftFileSystemImage"
             $fileSystemImage.VolumeName = [string]$manifest.discName
             # ISO9660 (1) + Joliet (2), readable by Windows, macOS and Linux.
@@ -279,16 +280,16 @@ namespace DiscFlow
             $dataStream = $fileSystemResult.ImageStream
 
             if ($fileSystemResult.TotalBlocks * $fileSystemResult.BlockSize -gt $formatData.TotalSectorsOnMedia * 2048) {
-                throw "所选文件超过当前盘片容量"
+                throw "The selected files exceed the current media capacity"
             }
 
-            Write-ProgressStatus -Percent 38 -Message "光盘文件系统已生成"
+            Write-ProgressStatus -Percent 38 -Message "Disc file system has been generated"
         }
         else {
-            throw "未知的任务模式：$($manifest.mode)"
+            throw "Unknown task mode: $($manifest.mode)"
         }
 
-        Write-ProgressStatus -Percent 52 -Message "正在写入光盘数据，请勿取出盘片"
+        Write-ProgressStatus -Percent 52 -Message "Writing disc data. Do not remove the disc"
         $cancelled = $false
 
         try {
@@ -300,10 +301,10 @@ namespace DiscFlow
         }
 
         if ($cancelled) {
-            throw "刻录已被系统取消"
+            throw "Burning was cancelled by the system"
         }
 
-        Write-ProgressStatus -Percent 96 -Message "正在关闭光盘会话"
+        Write-ProgressStatus -Percent 96 -Message "Closing disc session"
     }
     finally {
         if ($fileSystemResult -and $fileSystemResult -is [System.IDisposable]) {
@@ -323,7 +324,7 @@ namespace DiscFlow
         }
     }
 
-    Write-ProgressStatus -Percent 100 -Message "刻录完成"
+    Write-ProgressStatus -Percent 100 -Message "Burning completed"
     exit 0
 }
 catch {
@@ -332,4 +333,3 @@ catch {
     [Console]::Error.WriteLine($message)
     exit 1
 }
-
